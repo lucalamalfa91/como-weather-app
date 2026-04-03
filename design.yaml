@@ -1,0 +1,335 @@
+user_stories:
+  - id: US001
+    title: Display 7-day weather forecast for Como
+    description: As a user, I want to see a 7-day weather forecast for Como, Italy with daily temperature, precipitation, wind speed, and weather conditions
+    acceptance_criteria:
+      - Weather data is fetched from Open-Meteo API
+      - Display shows minimum and maximum temperature for each day
+      - Precipitation amount is displayed in millimeters
+      - Wind speed is shown in kilometers per hour
+      - Weather condition icons or text are visible
+      - Forecast covers exactly 7 days starting from today
+      - Page loads within 3 seconds
+      - Responsive design works on mobile and desktop
+
+  - id: US002
+    title: Backend API returns weather data
+    description: As a frontend developer, I want a REST API endpoint that returns 7-day weather forecast data for Como
+    acceptance_criteria:
+      - GET endpoint returns JSON with weather data
+      - Response includes temperature min/max, precipitation, wind speed, weather code
+      - Response time is under 2 seconds
+      - API handles errors gracefully with appropriate HTTP status codes
+      - No authentication required
+      - Data is cached to reduce API calls to Open-Meteo
+
+  - id: US003
+    title: Unit tests for backend API
+    description: As a developer, I want comprehensive unit tests for the weather API service
+    acceptance_criteria:
+      - xUnit tests cover all API endpoints
+      - Tests verify data transformation from Open-Meteo format
+      - Mock Open-Meteo API responses
+      - Test coverage is at least 80%
+      - All tests pass before deployment
+
+  - id: US004
+    title: Frontend component tests
+    description: As a developer, I want Jest tests for React weather components
+    acceptance_criteria:
+      - Jest tests cover weather card rendering
+      - Tests verify data display accuracy
+      - Tests check responsive behavior
+      - Test coverage is at least 75%
+      - All tests pass before deployment
+
+  - id: US005
+    title: Deploy backend to Azure Container Apps
+    description: As a DevOps engineer, I want the backend API deployed to Azure Container Apps
+    acceptance_criteria:
+      - Docker image is built and pushed to ACR
+      - Container App is configured with environment variables
+      - Health check endpoint is available
+      - Auto-scaling is configured
+      - Logs are sent to Application Insights
+
+  - id: US006
+    title: Deploy frontend to Azure Static Web App
+    description: As a DevOps engineer, I want the React frontend deployed to Azure Static Web App
+    acceptance_criteria:
+      - Build pipeline compiles React application
+      - Static files are deployed to Static Web App
+      - API endpoint is configured in environment
+      - CORS is properly configured
+      - CDN caching is enabled
+
+api:
+  - path: /api/weather/como
+    method: GET
+    description: Get 7-day weather forecast for Como, Italy
+    response_schema:
+      type: object
+      properties:
+        latitude:
+          type: number
+          description: Latitude of Como
+        longitude:
+          type: number
+          description: Longitude of Como
+        timezone:
+          type: string
+          description: Timezone identifier
+        daily:
+          type: object
+          properties:
+            time:
+              type: array
+              items:
+                type: string
+              description: Array of dates in YYYY-MM-DD format
+            temperature_2m_max:
+              type: array
+              items:
+                type: number
+              description: Maximum temperature in Celsius for each day
+            temperature_2m_min:
+              type: array
+              items:
+                type: number
+              description: Minimum temperature in Celsius for each day
+            precipitation_sum:
+              type: array
+              items:
+                type: number
+              description: Total precipitation in millimeters for each day
+            windspeed_10m_max:
+              type: array
+              items:
+                type: number
+              description: Maximum wind speed in kilometers per hour for each day
+            weather_code:
+              type: array
+              items:
+                type: integer
+              description: WMO weather code for each day
+
+  - path: /api/health
+    method: GET
+    description: Health check endpoint for Container App
+    response_schema:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - healthy
+            - unhealthy
+        timestamp:
+          type: string
+          description: ISO 8601 timestamp
+
+database:
+  type: none
+  description: No database required. Data is fetched from Open-Meteo API and cached in memory
+
+azure:
+  subscription: shared
+  resource_group: rg-como-weather
+  region: westeurope
+  acr_name: crsharedacrcorchn001
+  resources:
+    - name: como-weather-api
+      type: ContainerApp
+      description: Backend API for weather forecast
+      properties:
+        image: crsharedacrcorchn001.azurecr.io/como-weather-api:latest
+        cpu: 0.5
+        memory: 1Gi
+        min_replicas: 1
+        max_replicas: 3
+        environment_variables:
+          - name: ASPNETCORE_ENVIRONMENT
+            value: Production
+          - name: OPEN_METEO_BASE_URL
+            value: https://api.open-meteo.com/v1
+          - name: COMO_LATITUDE
+            value: "45.8081"
+          - name: COMO_LONGITUDE
+            value: "9.0852"
+        ingress:
+          external: true
+          target_port: 8080
+          traffic_weight: 100
+        health_probe:
+          path: /api/health
+          interval_seconds: 10
+          timeout_seconds: 5
+
+    - name: como-weather-frontend
+      type: StaticWebApp
+      description: React frontend for weather forecast
+      properties:
+        source_control: github
+        build_properties:
+          app_location: frontend
+          output_location: dist
+          app_build_command: npm run build
+        environment_variables:
+          - name: VITE_API_BASE_URL
+            value: https://como-weather-api.azurecontainerapps.io
+        cors:
+          allowed_origins:
+            - https://como-weather-frontend.azurestaticapps.net
+        caching:
+          default_ttl: 3600
+          max_age: 86400
+
+docker:
+  backend:
+    dockerfile: Dockerfile
+    base_image: mcr.microsoft.com/dotnet/aspnet:8.0
+    build_image: mcr.microsoft.com/dotnet/sdk:8.0
+    registry: crsharedacrcorchn001.azurecr.io
+    image_name: como-weather-api
+    tag: latest
+    ports:
+      - 8080
+
+  frontend:
+    dockerfile: Dockerfile
+    base_image: node:20-alpine
+    registry: crsharedacrcorchn001.azurecr.io
+    image_name: como-weather-frontend
+    tag: latest
+    ports:
+      - 3000
+
+testing:
+  backend:
+    framework: xUnit
+    test_project: ComoWeather.Api.Tests
+    coverage_target: 80
+    test_categories:
+      - unit
+      - integration
+    test_files:
+      - WeatherServiceTests.cs
+      - WeatherControllerTests.cs
+      - OpenMeteoClientTests.cs
+
+  frontend:
+    framework: Jest
+    test_project: frontend
+    coverage_target: 75
+    test_categories:
+      - unit
+      - component
+    test_files:
+      - WeatherCard.test.jsx
+      - WeatherForecast.test.jsx
+      - useWeather.test.js
+
+project_structure:
+  backend:
+    root: src/ComoWeather.Api
+    folders:
+      - Controllers
+      - Services
+      - Models
+      - Clients
+      - Extensions
+    main_file: Program.cs
+
+  frontend:
+    root: frontend
+    folders:
+      - src/components
+      - src/hooks
+      - src/services
+      - src/styles
+      - public
+    main_file: src/main.jsx
+
+deployment_pipeline:
+  stages:
+    - name: Build Backend
+      steps:
+        - Restore NuGet packages
+        - Run xUnit tests
+        - Build Docker image
+        - Push to ACR
+
+    - name: Build Frontend
+      steps:
+        - Install npm dependencies
+        - Run Jest tests
+        - Build React application
+        - Push to ACR
+
+    - name: Deploy Backend
+      steps:
+        - Deploy Container App from ACR image
+        - Configure environment variables
+        - Verify health check endpoint
+
+    - name: Deploy Frontend
+      steps:
+        - Deploy to Static Web App
+        - Configure API endpoint
+        - Verify CORS settings
+
+environment_variables:
+  development:
+    ASPNETCORE_ENVIRONMENT: Development
+    OPEN_METEO_BASE_URL: https://api.open-meteo.com/v1
+    VITE_API_BASE_URL: http://localhost:8080
+
+  production:
+    ASPNETCORE_ENVIRONMENT: Production
+    OPEN_METEO_BASE_URL: https://api.open-meteo.com/v1
+    VITE_API_BASE_URL: https://como-weather-api.azurecontainerapps.io
+
+dependencies:
+  backend:
+    - package: Microsoft.AspNetCore.OpenApi
+      version: "8.0.0"
+    - package: Swashbuckle.AspNetCore
+      version: "6.4.0"
+    - package: xunit
+      version: "2.6.0"
+    - package: xunit.runner.visualstudio
+      version: "2.5.0"
+    - package: Moq
+      version: "4.20.0"
+
+  frontend:
+    - package: react
+      version: "^18.2.0"
+    - package: react-dom
+      version: "^18.2.0"
+    - package: tailwindcss
+      version: "^3.3.0"
+    - package: axios
+      version: "^1.6.0"
+    - package: jest
+      version: "^29.7.0"
+    - package: "@testing-library/react"
+      version: "^14.0.0"
+
+documentation:
+  readme_sections:
+    - Project Overview
+    - Prerequisites
+    - Local Development Setup
+    - Running Tests
+    - Building Docker Images
+    - Deployment Instructions
+    - API Documentation
+    - Troubleshooting
+
+  api_documentation:
+    format: OpenAPI 3.0
+    file: openapi.yaml
+    endpoints:
+      - GET /api/weather/como
+      - GET /api/health

@@ -1,0 +1,117 @@
+```plantuml
+@startuml ComoWeatherSystem
+
+entity WeatherForecast {
+  * date : string
+  --
+  latitude : number
+  longitude : number
+  timezone : string
+}
+
+entity DailyWeather {
+  * forecastDate : string
+  --
+  temperatureMax : number
+  temperatureMin : number
+  precipitationSum : number
+  windspeedMax : number
+  weatherCode : integer
+}
+
+entity HealthCheck {
+  * timestamp : string
+  --
+  status : string
+}
+
+entity CachedWeatherData {
+  * cacheKey : string
+  --
+  weatherData : json
+  cachedAt : timestamp
+  expiresAt : timestamp
+}
+
+entity DeploymentConfig {
+  * resourceName : string
+  --
+  resourceType : string
+  region : string
+  environment : string
+  cpuAllocation : number
+  memoryAllocation : string
+  minReplicas : integer
+  maxReplicas : integer
+}
+
+entity EnvironmentVariable {
+  * variableName : string
+  --
+  variableValue : string
+  environment : string
+  description : string
+}
+
+entity APIEndpoint {
+  * path : string
+  --
+  method : string
+  description : string
+  responseSchema : json
+  responseTime : number
+}
+
+entity TestSuite {
+  * testName : string
+  --
+  framework : string
+  testCategory : string
+  coverageTarget : number
+  status : string
+}
+
+WeatherForecast ||--o{ DailyWeather : contains
+WeatherForecast ||--o{ CachedWeatherData : cached_as
+HealthCheck ||--o{ DeploymentConfig : monitors
+DeploymentConfig ||--o{ EnvironmentVariable : configured_with
+APIEndpoint ||--o{ TestSuite : tested_by
+WeatherForecast ||--o{ APIEndpoint : exposed_by
+
+note right of WeatherForecast
+  Represents 7-day weather forecast
+  for Como, Italy from Open-Meteo API
+end note
+
+note right of DailyWeather
+  Daily weather metrics including
+  temperature, precipitation, and wind
+end note
+
+note right of CachedWeatherData
+  In-memory cache to reduce
+  API calls to Open-Meteo
+end note
+
+note right of DeploymentConfig
+  Azure Container Apps and
+  Static Web App configurations
+end note
+
+note right of EnvironmentVariable
+  Configuration for development
+  and production environments
+end note
+
+note right of APIEndpoint
+  REST API endpoints for
+  weather data and health checks
+end note
+
+note right of TestSuite
+  xUnit backend tests and
+  Jest frontend component tests
+end note
+
+@enduml
+```

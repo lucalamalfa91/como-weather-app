@@ -1,0 +1,221 @@
+name: Deploy Como Weather Application
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  REGISTRY: crsharedacrcorchn001.azurecr.io
+  BACKEND_IMAGE_NAME: como-weather-api
+  FRONTEND_IMAGE_NAME: como-weather-frontend
+  RESOURCE_GROUP: rg-como-weather
+  BACKEND_CONTAINER_APP: como-weather-api
+  FRONTEND_STATIC_APP: como-weather-frontend
+  AZURE_REGION: westeurope
+
+jobs:
+  build-backend:
+    name: Build Backend API
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore NuGet packages
+        run: dotnet restore src/ComoWeather.Api/ComoWeather.Api.csproj
+
+      - name: Run unit tests
+        run: dotnet test src/ComoWeather.Api.Tests/ComoWeather.Api.Tests.csproj --configuration Release --logger "console;verbosity=detailed" --collect:"XPlat Code Coverage"
+
+      - name: Build backend application
+        run: dotnet build src/ComoWeather.Api/ComoWeather.Api.csproj --configuration Release --no-restore
+
+      - name: Log in to Azure Container Registry
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ env.REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Extract metadata for Docker image
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest
+
+      - name: Build and push Docker image for backend
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  build-frontend:
+    name: Build Frontend Application
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm run test -- --coverage --watchAll=false
+
+      - name: Build React application
+        working-directory: frontend
+        env:
+          VITE_API_BASE_URL: https://como-weather-api.azurecontainerapps.io
+        run: npm run build
+
+      - name: Log in to Azure Container Registry
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ env.REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Extract metadata for Docker image
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest
+
+      - name: Build and push Docker image for frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  deploy:
+    name: Deploy to Azure
+    runs-on: ubuntu-latest
+    needs:
+      - build-backend
+      - build-frontend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy backend to Azure Container Apps
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            az containerapp update \
+              --name ${{ env.BACKEND_CONTAINER_APP }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --image ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:latest \
+              --set-env-vars \
+                ASPNETCORE_ENVIRONMENT=Production \
+                OPEN_METEO_BASE_URL=https://api.open-meteo.com/v1 \
+                COMO_LATITUDE=45.8081 \
+                COMO_LONGITUDE=9.0852
+
+      - name: Verify backend health check
+        run: |
+          BACKEND_URL=$(az containerapp show \
+            --name ${{ env.BACKEND_CONTAINER_APP }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --query properties.configuration.ingress.fqdn \
+            -o tsv)
+          
+          for i in {1..30}; do
+            if curl -f https://$BACKEND_URL/api/health; then
+              echo "Backend health check passed"
+              exit 0
+            fi
+            echo "Waiting for backend to be ready... (attempt $i/30)"
+            sleep 10
+          done
+          
+          echo "Backend health check failed after 5 minutes"
+          exit 1
+
+      - name: Deploy frontend to Azure Static Web App
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+          app_location: frontend
+          output_location: dist
+          app_build_command: npm run build
+          skip_app_build: true
+
+      - name: Configure Static Web App environment variables
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            az staticwebapp appsettings set \
+              --name ${{ env.FRONTEND_STATIC_APP }} \
+              --setting-names VITE_API_BASE_URL=https://como-weather-api.azurecontainerapps.io
+
+      - name: Verify frontend deployment
+        run: |
+          FRONTEND_URL=$(az staticwebapp show \
+            --name ${{ env.FRONTEND_STATIC_APP }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --query defaultHostname \
+            -o tsv)
+          
+          for i in {1..30}; do
+            if curl -f https://$FRONTEND_URL; then
+              echo "Frontend deployment verified"
+              exit 0
+            fi
+            echo "Waiting for frontend to be ready... (attempt $i/30)"
+            sleep 10
+          done
+          
+          echo "Frontend verification failed after 5 minutes"
+          exit 1
+
+      - name: Log deployment summary
+        run: |
+          echo "Deployment completed successfully"
+          echo "Backend Container App: ${{ env.BACKEND_CONTAINER_APP }}"
+          echo "Frontend Static Web App: ${{ env.FRONTEND_STATIC_APP }}"
+          echo "Resource Group: ${{ env.RESOURCE_GROUP }}"
+          echo "Region: ${{ env.AZURE_REGION }}"
