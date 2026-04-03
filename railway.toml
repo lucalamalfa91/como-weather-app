@@ -1,9 +1,10 @@
 # Railway Configuration for Como Weather App Backend
-# This file tells Railway to build the backend from the backend/ directory
+# Dockerfile is in the root and builds from backend/ directory
 
 [build]
 builder = "DOCKERFILE"
-dockerfilePath = "backend/Dockerfile"
+dockerfilePath = "Dockerfile"
+watchPatterns = ["backend/**"]
 
 [deploy]
 numReplicas = 1
