@@ -1,6 +1,6 @@
 # 🌤️ Como Weather Forecast
 
-A modern, responsive weather forecast application showing 7-day weather predictions for Como, Italy.
+A modern, responsive weather forecast application showing 7-day weather predictions for Como, Italy
 
 ![Status](https://img.shields.io/badge/status-active-success.svg)
 ![Cost](https://img.shields.io/badge/cost-FREE-brightgreen.svg)
